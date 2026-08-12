@@ -153,7 +153,7 @@ class DateTimeFeatureEngineer(BaseEstimator, TransformerMixin):
                 filter_invalid_dates = True,
                 max_resolution_days = 1,
                 copy = False):
-        if self.max_resolution_days < 0: raise ValueError("max_resolution_days must be non-negative.")
+        if max_resolution_days < 0: raise ValueError("max_resolution_days must be non-negative.")
         
         self.keep_end_features = keep_end_features
         self.filter_invalid_dates = filter_invalid_dates
