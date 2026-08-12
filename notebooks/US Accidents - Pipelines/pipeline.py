@@ -7,7 +7,7 @@ from sklearn.pipeline import Pipeline
 import pandas as pd
 import numpy as np
 
-class WeatherAnomalyCleaner(BaseEstimator, TransformerMixin):
+class AnomalyCleaner(BaseEstimator, TransformerMixin):
     '''
     DOCSTRING
 
@@ -21,7 +21,7 @@ class WeatherAnomalyCleaner(BaseEstimator, TransformerMixin):
     NOTE: Missing Values are untouched if we drop the Anomalous rows
 
     PARAMETERS:
-        > weather_limits = A dictionary of form {column_name:(min,max),}
+        > value_limits = A dictionary of form {column_name:(min,max),}
         > drop = A boolean specifying if we drop Anomalous rows or cap the data instead
         > copy = Whether to return a copy of the dataframe or perform changes in-place
         > missing_values = Used if we cap values, 'ignore' by default. May be changed to 'raise'
@@ -37,32 +37,32 @@ class WeatherAnomalyCleaner(BaseEstimator, TransformerMixin):
     }
     
     @staticmethod
-    def _validate(weather_limits):
-        for col, (low,high) in weather_limits.items():
+    def _validate(value_limits):
+        for col, (low,high) in value_limits.items():
             if low > high:
                 raise ValueError(f"Lower Bound > Upper Bound for Key - {col}")
     
     def __init__(self,*,
-                 weather_limits = None,
+                 value_limits = None,
                  drop = True,
                  copy = False,
                  missing_values='ignore'):
                
-        self.weather_limits = weather_limits
+        self.value_limits = value_limits
         self.drop = drop
         self.copy = copy
         self.missing_values = missing_values
 
     def fit(self, X, y=None):
+        self._limits = (
+            self.DEFAULT_LIMITS 
+            if self.value_limits is None
+            else self.value_limits
+        )
+        
         missing = set(self._limits) - set(X.columns)
         
         if missing: raise ValueError(f"{self.__class__.__name__} requires these columns, but they are missing: {sorted(missing)}")
-        
-        self._limits = (
-            self.DEFAULT_LIMITS 
-            if self.weather_limits is None
-            else self.weather_limits
-        )
 
         type(self)._validate(self._limits)
         return self
@@ -425,7 +425,7 @@ class ColumnDropper(BaseEstimator, TransformerMixin):
 
 def make_preprocessing_pipe(*,
                             # WeatherAnomalyCleaner Parameters
-                            weather_limits = None,
+                            value_limits = None,
                             drop_anomalous_weather_data = True,
                             weather_missing_values = "ignore",
                             # DateTimeFeatureEngineer Parameters
@@ -444,7 +444,7 @@ def make_preprocessing_pipe(*,
                             copy = False):
     
     return Pipeline([
-        ('weather_anomaly_cleaner',WeatherAnomalyCleaner(weather_limits=weather_limits,drop=drop_anomalous_weather_data,missing_values=weather_missing_values,copy=copy)),
+        ('weather_anomaly_cleaner',AnomalyCleaner(value_limits=value_limits,drop=drop_anomalous_weather_data,missing_values=weather_missing_values,copy=copy)),
         ('datetime_feature_engineer',DateTimeFeatureEngineer(keep_end_features=datetime_keep_end_features,filter_invalid_dates=filter_invalid_dates,max_resolution_days=max_resolution_days,copy=copy)),
         ('illuminator',Illuminator(keep_others=illuminator_keep_others,mark_invalid=illuminator_mark_invalid,copy=copy)),
         ('column_dropper',ColumnDropper(columns=columns_to_drop,add_columns=append_columns_to_drop,copy=copy))
