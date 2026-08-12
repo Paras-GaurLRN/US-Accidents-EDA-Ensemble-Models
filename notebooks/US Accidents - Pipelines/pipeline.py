@@ -174,11 +174,14 @@ class DateTimeFeatureEngineer(BaseEstimator, TransformerMixin):
         check_is_fitted(self,'_datetime_features')
         
         if self.copy: X = X.copy()
-
+            
+        X["Start_Time"] = pd.to_datetime(X["Start_Time"])
+        X["End_Time"] = pd.to_datetime(X["End_Time"])
+        
         X = self._datetime_features.transform(X)
 
         X.rename(columns=self.DEFAULT_RENAME_MAP, inplace=True)
-
+        
         X["Days To Resolve"] = (
             X["End_Time"] - X["Start_Time"]
         ).dt.total_seconds() / 86400
