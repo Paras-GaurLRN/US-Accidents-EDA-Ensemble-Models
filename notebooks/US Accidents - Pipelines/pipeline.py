@@ -114,8 +114,8 @@ class DateTimeFeatureEngineer(BaseEstimator, TransformerMixin):
             "End_Time_day_of_year": "End Day",
             "End_Time_hour": "Resolution Time",
             "End_Time_year": "End Year",
-            "End_Time_is_weekend": "End Weekend",
-            "End_Time_is_leap_year": "End Leap Year",
+            "End_Time_weekend": "End Weekend",
+            "End_Time_leap_year": "End Leap Year",
         }
 
     def _validate_dates(self, X):
@@ -160,8 +160,8 @@ class DateTimeFeatureEngineer(BaseEstimator, TransformerMixin):
                 "day_of_year",
                 "hour",
                 "year",
-                "is_weekend",
-                "is_leap_year",
+                "weekend",
+                "leap_year",
             ],
             drop_original=False,
         )
