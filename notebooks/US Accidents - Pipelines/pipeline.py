@@ -1,5 +1,6 @@
-from sklearn.base import (BaseEstimator, TransformerMixin)
+from sklearn.base import (BaseEstimator, TransformerMixin, clone)
 from sklearn.utils.validation import check_is_fitted
+from sklearn.compose import ColumnTransformer
 from feature_engine.datetime import DatetimeFeatures
 from feature_engine.outliers import ArbitraryOutlierCapper
 from sklearn.pipeline import Pipeline
@@ -53,6 +54,10 @@ class WeatherAnomalyCleaner(BaseEstimator, TransformerMixin):
         self.missing_values = missing_values
 
     def fit(self, X, y=None):
+        missing = set(self._limits) - set(X.columns)
+        
+        if missing: raise ValueError(f"{self.__class__.__name__} requires these columns, but they are missing: {sorted(missing)}")
+        
         self._limits = (
             self.DEFAULT_LIMITS 
             if self.weather_limits is None
@@ -64,15 +69,17 @@ class WeatherAnomalyCleaner(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         check_is_fitted(self,"_limits")
-        
-        limits = self._limits
+
+        missing = set(self._limits) - set(X.columns)
+
+        if missing: raise ValueError(f"{self.__class__.__name__} requires these columns, but they are missing: {sorted(missing)}")
         
         if self.copy: X = X.copy()
 
         invalid = np.zeros(len(X), dtype=bool)
 
         if self.drop:
-            for column, (low, high) in limits.items():
+            for column, (low, high) in self._limits.items():
     
                 invalid |= (
                     X[column].notna()
@@ -84,8 +91,8 @@ class WeatherAnomalyCleaner(BaseEstimator, TransformerMixin):
         
     
         capper = ArbitraryOutlierCapper(
-            max_capping_dict = {col:high for col, (_,high) in limits.items()},
-            min_capping_dict = {col:low for col, (low,_) in limits.items()},
+            max_capping_dict = {col:high for col, (_,high) in self._limits.items()},
+            min_capping_dict = {col:low for col, (low,_) in self._limits.items()},
             missing_values = self.missing_values
         )
 
@@ -109,8 +116,8 @@ class DateTimeFeatureEngineer(BaseEstimator, TransformerMixin):
             "Start_Time_day_of_year": "Accident Day",
             "Start_Time_hour": "Accident Timing",
             "Start_Time_year": "Accident Year",
-            "Start_Time_is_weekend": "Weekend",
-            "Start_Time_is_leap_year": "Accident Leap Year",
+            "Start_Time_weekend": "Weekend",
+            "Start_Time_leap_year": "Accident Leap Year",
             "End_Time_day_of_year": "End Day",
             "End_Time_hour": "Resolution Time",
             "End_Time_year": "End Year",
@@ -146,6 +153,7 @@ class DateTimeFeatureEngineer(BaseEstimator, TransformerMixin):
                 filter_invalid_dates = True,
                 max_resolution_days = 1,
                 copy = False):
+        if self.max_resolution_days < 0: raise ValueError("max_resolution_days must be non-negative.")
         
         self.keep_end_features = keep_end_features
         self.filter_invalid_dates = filter_invalid_dates
@@ -154,6 +162,15 @@ class DateTimeFeatureEngineer(BaseEstimator, TransformerMixin):
         
 
     def fit(self, X, y=None):
+        missing = set(["Start_Time","End_Time"]) - set(X.columns)
+
+        if missing: raise ValueError(f"{self.__class__.__name__} requires these columns, but they are missing: {sorted(missing)}")
+
+        if self.copy: X = X.copy()
+        
+        X["Start_Time"] = pd.to_datetime(X["Start_Time"])
+        X["End_Time"] = pd.to_datetime(X["End_Time"])
+        
         self._datetime_features = DatetimeFeatures(
             variables=["Start_Time", "End_Time"],
             features_to_extract=[
@@ -165,13 +182,17 @@ class DateTimeFeatureEngineer(BaseEstimator, TransformerMixin):
             ],
             drop_original=False,
         )
-
+        
         self._datetime_features.fit(X)
 
         return self
 
     def transform(self, X):
         check_is_fitted(self,'_datetime_features')
+
+        missing = set(["Start_Time","End_Time"]) - set(X.columns)
+
+        if missing: raise ValueError(f"{self.__class__.__name__} requires these columns, but they are missing: {sorted(missing)}")
         
         if self.copy: X = X.copy()
             
@@ -248,7 +269,7 @@ class Illuminator(BaseEstimator,TransformerMixin):
 
     PARAMETERS:
         > keep_others = If the 4 processed columns are to be kept or dropped
-        > invalid_marking = If to set values to 'Invalid' if order is invalid, else marked 'Missing'
+        > mark_invalid = If to set values to 'Invalid' if order is invalid, else marked 'Missing'
         > copy = Whether to return a copy of the dataframe or perform changes in-place
     '''
     
@@ -261,21 +282,29 @@ class Illuminator(BaseEstimator,TransformerMixin):
         'Miscellaneous' : ('Missing','Invalid')
     }
 
-    DEFAULT_LIGHT_COLUMNS = ("Sunrise_Sunset","Civil_Twilight","Nautical_Twilight","Astronomical_Twilight",)
+    DEFAULT_LIGHT_COLUMNS = ["Sunrise_Sunset","Civil_Twilight","Nautical_Twilight","Astronomical_Twilight",]
     
     def __init__(self,*,
                  keep_others = False,
-                 invalid_marking = True,
+                 mark_invalid = True,
                  copy = False):
         
         self.keep_others = keep_others
-        self.invalid_marking = invalid_marking
+        self.mark_invalid = mark_invalid
         self.copy = copy
 
     def fit(self, X, y=None):
+        missing = set(self.DEFAULT_LIGHT_COLUMNS) - set(X.columns)
+
+        if missing: raise ValueError(f"{self.__class__.__name__} requires these columns, but they are missing: {sorted(missing)}")
+
         return self
 
     def transform(self, X):
+        missing = set(self.DEFAULT_LIGHT_COLUMNS) - set(X.columns)
+
+        if missing: raise ValueError(f"{self.__class__.__name__} requires these columns, but they are missing: {sorted(missing)}")
+        
         if self.copy: X = X.copy()
 
         X['Illumination'] = np.select(
@@ -326,7 +355,7 @@ class Illuminator(BaseEstimator,TransformerMixin):
                 'Night'
             ],
         
-            default=('Invalid' if self.invalid_marking else 'Missing')
+            default=('Invalid' if self.mark_invalid else 'Missing')
         )
 
         if not self.keep_others:
@@ -350,7 +379,7 @@ class ColumnDropper(BaseEstimator, TransformerMixin):
         > copy =  Whether to return a copy of the dataframe or perform changes in-place
     """
     
-    DEFAULT_COLUMNS = (
+    DEFAULT_COLUMNS = [
         "Start_Lat",
         "Start_Lng",
         "End_Lat",
@@ -366,7 +395,7 @@ class ColumnDropper(BaseEstimator, TransformerMixin):
         "Weather_Timestamp",
         "Wind_Chill(F)",
         "Precipitation(in)",
-    )
+    ]
     
     def __init__(self,*,
                  columns = None,
@@ -377,11 +406,11 @@ class ColumnDropper(BaseEstimator, TransformerMixin):
             raise ValueError("Specify Columns if Columns are to be added")
 
         if columns is not None:
-            columns = tuple(columns)
+            columns = list(columns)
         
         self.copy = copy
         self.add_columns = add_columns
-        self.columns = (self.DEFAULT_COLUMNS if (columns is None) else columns) if (not self.add_columns) else tuple(set(self.DEFAULT_COLUMNS + columns))
+        self.columns = (self.DEFAULT_COLUMNS if (columns is None) else columns) if (not self.add_columns) else list(set(self.DEFAULT_COLUMNS + list(columns)))
 
     def fit(self, X, y=None):
         return self
@@ -405,7 +434,7 @@ def make_preprocessing_pipe(*,
                             max_resolution_days = 1,
                             # Illuminator Parameters
                             illuminator_keep_others = False,
-                            illuminator_invalid_marking = True,
+                            illuminator_mark_invalid = True,
                             # ColumnDropper Parameters
                             columns_to_drop = None,
                             append_columns_to_drop = False,
@@ -417,9 +446,8 @@ def make_preprocessing_pipe(*,
     return Pipeline([
         ('weather_anomaly_cleaner',WeatherAnomalyCleaner(weather_limits=weather_limits,drop=drop_anomalous_weather_data,missing_values=weather_missing_values,copy=copy)),
         ('datetime_feature_engineer',DateTimeFeatureEngineer(keep_end_features=datetime_keep_end_features,filter_invalid_dates=filter_invalid_dates,max_resolution_days=max_resolution_days,copy=copy)),
-        ('illuminator',Illuminator(keep_others=illuminator_keep_others,invalid_marking=illuminator_invalid_marking,copy=copy)),
+        ('illuminator',Illuminator(keep_others=illuminator_keep_others,mark_invalid=illuminator_mark_invalid,copy=copy)),
         ('column_dropper',ColumnDropper(columns=columns_to_drop,add_columns=append_columns_to_drop,copy=copy))
     ],
     memory = memory,
     verbose = verbose)
-
