@@ -168,8 +168,8 @@ class DateTimeFeatureEngineer(BaseEstimator, TransformerMixin):
 
         if self.copy: X = X.copy()
         
-        X["Start_Time"] = pd.to_datetime(X["Start_Time"])
-        X["End_Time"] = pd.to_datetime(X["End_Time"])
+        X["Start_Time"] = pd.to_datetime(X["Start_Time"], format='mixed')
+        X["End_Time"] = pd.to_datetime(X["End_Time"], format='mixed')
         
         self._datetime_features = DatetimeFeatures(
             variables=["Start_Time", "End_Time"],
@@ -196,8 +196,8 @@ class DateTimeFeatureEngineer(BaseEstimator, TransformerMixin):
         
         if self.copy: X = X.copy()
             
-        X["Start_Time"] = pd.to_datetime(X["Start_Time"])
-        X["End_Time"] = pd.to_datetime(X["End_Time"])
+        X["Start_Time"] = pd.to_datetime(X["Start_Time"], format='mixed')
+        X["End_Time"] = pd.to_datetime(X["End_Time"], format='mixed')
         
         X = self._datetime_features.transform(X)
 
