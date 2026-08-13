@@ -1,32 +1,41 @@
+from warnings import warn
 from sklearn.base import (BaseEstimator, TransformerMixin, clone)
+from imblearn.base import BaseSampler
 from sklearn.utils.validation import check_is_fitted
 from sklearn.compose import ColumnTransformer
 from feature_engine.datetime import DatetimeFeatures
 from feature_engine.outliers import ArbitraryOutlierCapper
-from sklearn.pipeline import Pipeline
+from imblearn.pipeline import Pipeline as IMBPipe
 import pandas as pd
 import numpy as np
 
-class AnomalyCleaner(BaseEstimator, TransformerMixin):
+class AnomalyCleaner(BaseSampler, TransformerMixin):
     '''
     DOCSTRING
 
-    Pretty simple transformer, drops all data that is not within the range.
-    We may choose to cap data instead by setting 'drop' to False.
+    A 2 in 1 Sampler x Transformer,
+    Drops all observation that are not within the range, if Sampling.
+    Else we Transform, i.e. cap the data, by setting 'drop_when_training' to False.
 
     'missing_values' is used only if we are capping. Ignores by default, the user may change to Raise.
 
     Use np.inf or -np.inf to indicate that no upper or lower bound should be applied.
 
     NOTE: Missing Values are untouched if we drop the Anomalous rows
+    NOTE: This Sampler x Transformer uses a strict 'fit(X) -> fit_resample(X,y) -> transform(X)' non-standard API to ensure consistency.
+          fit() initializes the anomaly limits and internal capper but does not mark the cleaner as trained;
+          fit_resample() must be called before transform() is permitted.
+    * Please read the error messages and warnings for detailed implementation overview.
 
     PARAMETERS:
         > value_limits = A dictionary of form {column_name:(min,max),}
-        > drop = A boolean specifying if we drop Anomalous rows or cap the data instead
+        > drop_when_training = A boolean specifying if we drop Anomalous rows or cap the data instead
         > copy = Whether to return a copy of the dataframe or perform changes in-place
         > missing_values = Used if we cap values, 'ignore' by default. May be changed to 'raise'
     ''' 
 
+    # Design rationale: The non-standard lifecycle is intentional. It separates capper initialization from training-time resampling, 
+    # and ensures that the same cleaner can operate as a sampler during training and as a capper during inference.
     
     DEFAULT_LIMITS = {
         "Temperature(F)": (-60, 130),
@@ -34,6 +43,7 @@ class AnomalyCleaner(BaseEstimator, TransformerMixin):
         "Pressure(in)": (20, 32.5),
         "Visibility(mi)": (0, 30),
         "Wind_Speed(mph)": (0, 150),
+        "Precipitation(in)" : (0, np.inf)
     }
     
     @staticmethod
@@ -44,12 +54,12 @@ class AnomalyCleaner(BaseEstimator, TransformerMixin):
     
     def __init__(self,*,
                  value_limits = None,
-                 drop = True,
+                 drop_when_training = False,
                  copy = False,
                  missing_values='ignore'):
                
         self.value_limits = value_limits
-        self.drop = drop
+        self.drop_when_training = drop_when_training
         self.copy = copy
         self.missing_values = missing_values
 
@@ -65,20 +75,48 @@ class AnomalyCleaner(BaseEstimator, TransformerMixin):
         if missing: raise ValueError(f"{self.__class__.__name__} requires these columns, but they are missing: {sorted(missing)}")
 
         type(self)._validate(self._limits)
+
+        self._capper = ArbitraryOutlierCapper(
+            max_capping_dict = {col:high for col, (_,high) in self._limits.items()},
+            min_capping_dict = {col:low for col, (low,_) in self._limits.items()},
+            missing_values = self.missing_values
+        )
+        self._capper.fit(X, y)
+        
         return self
 
-    def transform(self, X):
-        check_is_fitted(self,"_limits")
+    def _fit_resample(self, X, y=None):
+        check_is_fitted(self,["_limits","_capper"],
+                        msg="Sampler x Transformer, %(name)s must be fitted before resampling. Please run AnomalyCleaner.fit() "
+                        "If AnomalyCleaner raised this issue when in an imbalanced-learn Pipeline, please run fit() once before using "
+                        "it in the Pipeline. This API explictly is to ensure consistency of Pipeline behaviour with standalone use.")
 
         missing = set(self._limits) - set(X.columns)
 
         if missing: raise ValueError(f"{self.__class__.__name__} requires these columns, but they are missing: {sorted(missing)}")
-        
-        if self.copy: X = X.copy()
 
-        invalid = np.zeros(len(X), dtype=bool)
+        if (y is None) and self.drop_when_training:
+            raise RuntimeError(
+                "AnomalyCleaner was passed only X, when 'drop_when_training' was set to True "
+                "This is not allowed, if the User was Training, pass y to ensure data consistency. "
+                "If the User was Testing/Predicting, Then use AnomalyCleaner.transform(). "
+                "If AnomalyCleaner was used in an imblearn.pipeline.Pipeline, explictly set 'drop_when_training' "
+                "to False to mimic calling transform(), which will only cap. "
+                "This error is a fail-safe to prevent from failed fit_resample() calls by the Pipeline, "
+                "which is the default behaviour; and to ensure use of transform() instead, which is the intended behaviour."
+            )
+            
+        elif (y is None) and (not self.drop_when_training):
+            raise ValueError(
+                "y was not passed to AnomalyCleaner.fit_resample() at the time of Training "
+                "y must always be passed at the time of training, to be in accordance with the imbalanced-learn API"
+            )
 
-        if self.drop:
+        if self.copy: X = X.copy(); y = y.copy()
+
+        if self.drop_when_training:
+            invalid = np.zeros(len(X), dtype=bool)
+            
             for column, (low, high) in self._limits.items():
     
                 invalid |= (
@@ -86,17 +124,33 @@ class AnomalyCleaner(BaseEstimator, TransformerMixin):
                     &
                     ~X[column].between(low, high)
                 )
-    
-            return X.loc[~invalid].reset_index(drop=True)
+            self._trained = True
+            return X.loc[~invalid], y.loc[~invalid]
         
-    
-        capper = ArbitraryOutlierCapper(
-            max_capping_dict = {col:high for col, (_,high) in self._limits.items()},
-            min_capping_dict = {col:low for col, (low,_) in self._limits.items()},
-            missing_values = self.missing_values
-        )
+        self._trained = True
+        return self._capper.transform(X), y
 
-        return capper.fit_transform(X)
+    def transform(self, X, issue_warning=True):
+        check_is_fitted(self,["_limits","_capper","_trained"],
+                        msg="Sampler x Transformer, %(name)s must be trained before resampling. Please run fit_resample()")
+
+        missing = set(self._limits) - set(X.columns)
+
+        if missing: raise ValueError(f"{self.__class__.__name__} requires these columns, but they are missing: {sorted(missing)}")
+
+        if issue_warning:
+            warn(
+                "AnomalyCleaner.transform() is meant only for testing/prediction purposes. "
+                "It will strictly only cap the data. Useful if the User wishes to sample the data when training "
+                "but transform at the time of testing/prediction. Which is the intended behaviour. "
+                "It is interchangeable with fit_resample() if 'drop_when_training' is False. "
+                "set 'issue_warning' explicitly to False in transform() if you wish to turn this warning off.",
+                UserWarning
+            )
+        
+        if self.copy: X = X.copy()
+
+        return self._capper.transform(X)
 
 class DateTimeFeatureEngineer(BaseEstimator, TransformerMixin):
     '''
@@ -443,7 +497,7 @@ def make_preprocessing_pipe(*,
                             verbose = False,
                             copy = False):
     
-    return Pipeline([
+    return IMBPipe([
         ('weather_anomaly_cleaner',AnomalyCleaner(value_limits=value_limits,drop=drop_anomalous_weather_data,missing_values=weather_missing_values,copy=copy)),
         ('datetime_feature_engineer',DateTimeFeatureEngineer(keep_end_features=datetime_keep_end_features,filter_invalid_dates=filter_invalid_dates,max_resolution_days=max_resolution_days,copy=copy)),
         ('illuminator',Illuminator(keep_others=illuminator_keep_others,mark_invalid=illuminator_mark_invalid,copy=copy)),
