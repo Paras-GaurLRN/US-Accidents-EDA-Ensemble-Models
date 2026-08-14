@@ -218,7 +218,7 @@ class DateTimeFeatureEngineer(BaseEstimator, TransformerMixin):
 
     PARAMETERS:
         > keep_end_features = Whether to keep accident End related features
-        > filter_invalid_dates = Whether to filter invalid dates or now
+        > mark_invalid_dates = Whether to mark invalid dates or not
         > max_resolution_days = Maximum days allowed for accident resolution, any value more than that will be marked invalid
         > copy = Whether to return a copy of the dataframe or perform changes in-place
     '''
@@ -261,13 +261,13 @@ class DateTimeFeatureEngineer(BaseEstimator, TransformerMixin):
     
     def __init__(self,*,
                 keep_end_features = False,
-                filter_invalid_dates = True,
+                mark_invalid_dates = True,
                 max_resolution_days = 1,
                 copy = False):
         if max_resolution_days < 0: raise ValueError("max_resolution_days must be non-negative.")
         
         self.keep_end_features = keep_end_features
-        self.filter_invalid_dates = filter_invalid_dates
+        self.mark_invalid_dates = mark_invalid_dates
         self.max_resolution_days = max_resolution_days
         self.copy = copy
         
@@ -322,18 +322,10 @@ class DateTimeFeatureEngineer(BaseEstimator, TransformerMixin):
             X["End Year"] - X["Accident Year"]
         )
 
-        if self.filter_invalid_dates: 
+        if self.mark_invalid_dates: 
             valid = self._validate_dates(X)
-            X = X.loc[valid].copy()
             
-            X.drop(
-                columns=[
-                    "Days To Resolve",
-                    "Year Difference",
-                ],
-                inplace=True,
-                errors="ignore",
-            )
+            X["Invalid Date Time Data"] = (~valid).astype("int8")
             
         X.drop(
             columns=[
@@ -541,7 +533,7 @@ def make_preprocessing_pipe(*,
                             weather_missing_values = "ignore",
                             # DateTimeFeatureEngineer Parameters
                             datetime_keep_end_features = False,
-                            filter_invalid_dates = True,
+                            mark_invalid_dates = True,
                             max_resolution_days = 1,
                             # Illuminator Parameters
                             illuminator_keep_others = False,
@@ -556,7 +548,7 @@ def make_preprocessing_pipe(*,
     
     return IMBPipe([
         ('anomaly_cleaner',AnomalyCleaner(value_limits=value_limits,drop_when_training=drop_anomalous_data,missing_values=weather_missing_values,copy=copy,grid_mode=False)),
-        ('datetime_feature_engineer',DateTimeFeatureEngineer(keep_end_features=datetime_keep_end_features,filter_invalid_dates=filter_invalid_dates,max_resolution_days=max_resolution_days,copy=copy)),
+        ('datetime_feature_engineer',DateTimeFeatureEngineer(keep_end_features=datetime_keep_end_features,mark_invalid_dates=mark_invalid_dates,max_resolution_days=max_resolution_days,copy=copy)),
         ('illuminator',Illuminator(keep_others=illuminator_keep_others,mark_invalid=illuminator_mark_invalid,copy=copy)),
         ('column_dropper',ColumnDropper(columns=columns_to_drop,add_columns=append_columns_to_drop,copy=copy))
     ],
