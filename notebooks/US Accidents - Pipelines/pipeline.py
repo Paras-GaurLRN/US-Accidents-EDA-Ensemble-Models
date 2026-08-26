@@ -526,31 +526,54 @@ class ColumnDropper(BaseEstimator, TransformerMixin):
             errors = "ignore",
         )
 
-def make_preprocessing_pipe(*,
-                            # WeatherAnomalyCleaner Parameters
-                            value_limits = None,
-                            drop_anomalous_data = False,
-                            weather_missing_values = "ignore",
-                            # DateTimeFeatureEngineer Parameters
-                            datetime_keep_end_features = False,
-                            mark_invalid_dates = True,
-                            max_resolution_days = 1,
-                            # Illuminator Parameters
-                            illuminator_keep_others = False,
-                            illuminator_mark_invalid = True,
-                            # ColumnDropper Parameters
-                            columns_to_drop = None,
-                            append_columns_to_drop = False,
-                            # Pipeline Parameters
-                            memory = None,
-                            verbose = False,
-                            copy = False):
+class OutOfCoreNumericalImputer(BaseEstimator, TransformerMixin):
+    """
+    DOCSTRING
+
+    This Transformer has been designed to be Stateless and work with chunk based data.
+    The Transformer needs to fit the Means at once and unincrementally to ensure that
+    non-represetative means are not used for imputation of the data.
+
+    PARAMETERS:
+        > file_name = Path of the Data
+        > columns = Columns to Mean-Impute
+        > batch_size = The Batch Size for the chunks, it doesn't affect the final results
+        > copy = Whether to return a copy of the dataframe or perform changes in-place
+    """
+    def __init__(self,*,
+                 file_name,
+                 columns,
+                 batch_size = None,
+                 copy = False):
+        self.file_name = file_name
+        self.columns = columns
+        self.copy = copy
+        self.batch_size = batch_size
     
-    return IMBPipe([
-        ('anomaly_cleaner',AnomalyCleaner(value_limits=value_limits,drop_when_training=drop_anomalous_data,missing_values=weather_missing_values,copy=copy,grid_mode=False)),
-        ('datetime_feature_engineer',DateTimeFeatureEngineer(keep_end_features=datetime_keep_end_features,mark_invalid_dates=mark_invalid_dates,max_resolution_days=max_resolution_days,copy=copy)),
-        ('illuminator',Illuminator(keep_others=illuminator_keep_others,mark_invalid=illuminator_mark_invalid,copy=copy)),
-        ('column_dropper',ColumnDropper(columns=columns_to_drop,add_columns=append_columns_to_drop,copy=copy))
-    ],
-    memory = memory,
-    verbose = verbose)
+    def fit(self, X=None, y=None):
+        if self.batch_size is None: self.batch_size = 20_000
+        
+        means = {}
+        for col in self.columns:
+            _sum = 0
+            _count = 0
+            for chunk in pd.read_csv(self.file_name,index_col='ID',usecols=['ID',col],chunksize=self.batch_size):
+                _sum += chunk[col].sum(skipna=True)
+                _count += chunk.notna().sum()
+            means[col] = _sum/_count
+
+        self._means = means
+        
+        return self
+        
+    def transform(self, chunk):
+        check_is_fitted(self, "_means")
+
+        if sorted((chunk.columns).to_list()) != sorted(self.columns): raise ValueError('Transformation columns do not match fitted columns')
+        
+        if self.copy: chunk = chunk.copy()
+
+        for col in self.columns:
+            chunk[col] = chunk[col].fillna(self._means[col])
+        
+        return chunk
