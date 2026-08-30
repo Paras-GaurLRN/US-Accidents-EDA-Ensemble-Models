@@ -4,6 +4,10 @@ This is a **Primary Dataset** available freely on Kaggle (Refer - https://www.ka
 
 The Research on this dataset if available here - https://arxiv.org/abs/1906.05409
 
+# The Kaggle Collection
+
+The Kaggle Collection is available here - https://www.kaggle.com/work/collections/18305074
+
 # The Aim
 
 My Project is a large scale analysis, prediction and MLOps project.
