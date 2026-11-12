@@ -1,0 +1,27 @@
+{
+  "notebook_count": 11,
+  "run_order": [
+    "1 US Accidents - Weekly Model-Free PreProcessing.ipynb",
+    "2 US Accidents - Weekly Forecasting EDA and Split.ipynb",
+    "3I US Accidents - Incremental Weekly Preprocessing.ipynb",
+    "3N US Accidents - DCRNN Weekly Graph Preprocessing.ipynb",
+    "4IA US Accidents - SGDRegressor Squared Error.ipynb",
+    "4IB US Accidents - SGDRegressor Huber.ipynb",
+    "4IC US Accidents - SGDRegressor Epsilon Insensitive.ipynb",
+    "4ID US Accidents - MLPRegressor.ipynb",
+    "4N US Accidents - Weekly DCRNN.ipynb",
+    "5I US Accidents - Incremental Regression Ensemble.ipynb",
+    "6 US Accidents - Final Weekly Forecast Benchmarking.ipynb"
+  ],
+  "target_frequency": "weekly",
+  "forecast_horizon": 1,
+  "random_state": 34,
+  "models": [
+    "SGD squared_error",
+    "SGD huber",
+    "SGD epsilon_insensitive",
+    "MLPRegressor",
+    "four-model mean ensemble",
+    "weekly state-graph DCRNN"
+  ]
+}
